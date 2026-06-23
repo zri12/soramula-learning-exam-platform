@@ -18,6 +18,7 @@ import {
   BadgeCheck,
 } from 'lucide-react';
 import { useApp, Role, View } from '../../contexts';
+import { hasRegisteredPasskey, registerPasskey } from '../../lib/biometrics';
 
 const PROFILE_BACK_VIEW: Record<Role, View> = {
   siswa: 'student_profil',
@@ -289,14 +290,24 @@ export function PengaturanPage() {
 
 export function DataFingerprintPage() {
   const { navigate, role, isDarkMode } = useApp();
-  const [status, setStatus] = useState<'idle' | 'scanning' | 'verified'>('idle');
+  const [status, setStatus] = useState<'idle' | 'scanning' | 'verified' | 'failed'>(() =>
+    hasRegisteredPasskey() ? 'verified' : 'idle'
+  );
+  const [message, setMessage] = useState('');
   const theme = isDarkMode ? DARK_THEME : LIGHT_THEME;
 
-  useEffect(() => {
-    if (status !== 'scanning') return;
-    const timer = setTimeout(() => setStatus('verified'), 1800);
-    return () => clearTimeout(timer);
-  }, [status]);
+  const startRegistration = async () => {
+    setStatus('scanning');
+    setMessage('Ikuti dialog keamanan perangkat untuk mendaftarkan fingerprint/passkey.');
+    try {
+      await registerPasskey(`${role}@soramula.id`);
+      setStatus('verified');
+      setMessage('Fingerprint/passkey berhasil didaftarkan di perangkat ini.');
+    } catch (error) {
+      setStatus('failed');
+      setMessage(error instanceof Error ? error.message : 'Pendaftaran fingerprint/passkey gagal.');
+    }
+  };
 
   return (
     <div className="h-full overflow-y-auto" style={{ background: theme.page }}>
@@ -311,10 +322,12 @@ export function DataFingerprintPage() {
               <p style={{ color: theme.text, fontWeight: 700, fontSize: 15 }}>Fingerprint Login</p>
               <p style={{ color: theme.muted, fontSize: 13, lineHeight: 1.5 }}>
                 {status === 'verified'
-                  ? 'Sidik jari berhasil diverifikasi dan siap digunakan.'
+                  ? 'Fingerprint/passkey berhasil diverifikasi dan siap digunakan.'
                   : status === 'scanning'
-                  ? 'Sedang memindai sidik jari...'
-                  : 'Belum ada sidik jari terdaftar untuk akun ini.'}
+                  ? 'Sedang menunggu verifikasi perangkat...'
+                  : status === 'failed'
+                  ? 'Pendaftaran belum berhasil.'
+                  : 'Belum ada fingerprint/passkey terdaftar untuk akun ini.'}
               </p>
             </div>
           </div>
@@ -322,7 +335,7 @@ export function DataFingerprintPage() {
           <div className="grid grid-cols-3 gap-3 text-center">
             {[
               { label: 'Terdaftar', value: '1 perangkat' },
-              { label: 'Metode', value: 'Sensor biometrik' },
+              { label: 'Metode', value: 'WebAuthn' },
               { label: 'Status', value: status === 'verified' ? 'Aktif' : 'Siap' },
             ].map((item) => (
               <div key={item.label} className="rounded-2xl p-3" style={{ background: '#F8FAFC' }}>
@@ -332,19 +345,20 @@ export function DataFingerprintPage() {
             ))}
           </div>
 
-          <div className="rounded-2xl p-4" style={{ background: status === 'verified' ? '#DCFCE7' : theme.noteBg }}>
-            <p style={{ color: status === 'verified' ? '#16A34A' : theme.noteText, fontSize: 13, fontWeight: 600 }}>
-              {status === 'verified' ? 'Fingerprint berhasil didaftarkan.' : 'Tekan tombol di bawah untuk memulai pendaftaran.'}
+          <div className="rounded-2xl p-4" style={{ background: status === 'verified' ? '#DCFCE7' : status === 'failed' ? '#FEE2E2' : theme.noteBg }}>
+            <p style={{ color: status === 'verified' ? '#16A34A' : status === 'failed' ? '#DC2626' : theme.noteText, fontSize: 13, fontWeight: 600 }}>
+              {message || (status === 'verified' ? 'Fingerprint/passkey berhasil didaftarkan.' : 'Tekan tombol di bawah untuk memulai pendaftaran.')}
             </p>
           </div>
 
           <button
-            onClick={() => setStatus('scanning')}
+            onClick={startRegistration}
+            disabled={status === 'scanning'}
             className="w-full py-3.5 rounded-2xl font-semibold flex items-center justify-center gap-2"
-            style={{ background: '#A855F7', color: '#fff' }}
+            style={{ background: status === 'scanning' ? '#C084FC' : '#A855F7', color: '#fff' }}
           >
             <Sparkles size={16} />
-            {status === 'scanning' ? 'Memindai...' : status === 'verified' ? 'Pindai Ulang' : 'Daftarkan Fingerprint'}
+            {status === 'scanning' ? 'Menunggu perangkat...' : status === 'verified' ? 'Daftarkan Ulang' : 'Daftarkan Fingerprint'}
           </button>
         </div>
 

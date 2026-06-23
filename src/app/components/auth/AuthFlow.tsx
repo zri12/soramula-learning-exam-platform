@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { useApp, Role } from '../../contexts';
 import logo from '../../../assets/logo.png';
+import { authenticatePasskey, hasRegisteredPasskey } from '../../lib/biometrics';
 
 // ─── Splash Screen ──────────────────────────────────────────────
 function SplashScreen() {
@@ -211,10 +212,31 @@ function OnboardingPage() {
 // ─── Fingerprint Modal ────────────────────────────────────────────
 function FingerprintModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
   const [status, setStatus] = useState<'waiting' | 'success' | 'failed'>('waiting');
+  const [message, setMessage] = useState('Ikuti dialog keamanan perangkat Anda untuk memverifikasi identitas.');
 
   useEffect(() => {
-    const t1 = setTimeout(() => setStatus('success'), 2500);
-    return () => clearTimeout(t1);
+    let active = true;
+
+    const runAuth = async () => {
+      try {
+        if (!hasRegisteredPasskey()) {
+          throw new Error('Fingerprint belum didaftarkan. Buka Profil > Data Fingerprint untuk mendaftarkan perangkat ini.');
+        }
+        await authenticatePasskey();
+        if (!active) return;
+        setStatus('success');
+        setMessage('Identitas Anda berhasil diverifikasi oleh perangkat.');
+      } catch (error) {
+        if (!active) return;
+        setStatus('failed');
+        setMessage(error instanceof Error ? error.message : 'Verifikasi fingerprint gagal.');
+      }
+    };
+
+    runAuth();
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -272,10 +294,10 @@ function FingerprintModal({ onClose, onSuccess }: { onClose: () => void; onSucce
           </h3>
           <p style={{ color: '#64748B', fontSize: 14, lineHeight: 1.6 }}>
             {status === 'success'
-              ? 'Identitas Anda berhasil diverifikasi.'
+              ? message
               : status === 'failed'
-              ? 'Sidik jari tidak dikenali. Silakan coba lagi.'
-              : 'Tempelkan jari Anda pada sensor untuk masuk ke Soramula'}
+              ? message
+              : message}
           </p>
         </div>
 

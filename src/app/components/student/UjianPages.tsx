@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Search, Calendar, Clock, CheckCircle, AlertCircle, Camera,
   ChevronLeft, ChevronRight, AlertTriangle, X
 } from 'lucide-react';
 import { useApp } from '../../contexts';
+import { createCameraStream, detectFace, stopCameraStream } from '../../lib/faceDetection';
 
 const UJIAN_DATA = [
   { id: 1, title: 'Ujian Biologi Bab 1', mapel: 'Biologi', tanggal: '21 Juni 2026', durasi: 90, soal: 20, status: 'tersedia' },
@@ -143,12 +144,71 @@ export function UjianDetail() {
 // ─── Verifikasi Wajah ─────────────────────────────────────────────
 export function VerifikasiWajah() {
   const { navigate } = useApp();
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const [status, setStatus] = useState<'detecting' | 'detected' | 'failed'>('detecting');
+  const [message, setMessage] = useState('Mengaktifkan kamera...');
   const [scanY, setScanY] = useState(0);
 
   useEffect(() => {
-    const t1 = setTimeout(() => setStatus('detected'), 3000);
-    return () => clearTimeout(t1);
+    let active = true;
+    let interval: number | undefined;
+    let detectedStreak = 0;
+    let missedStreak = 0;
+
+    const startCamera = async () => {
+      try {
+        const stream = await createCameraStream();
+        if (!active) {
+          stopCameraStream(stream);
+          return;
+        }
+
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play();
+        }
+
+        setMessage('Kamera aktif. Pastikan wajah berada di tengah frame.');
+        interval = window.setInterval(async () => {
+          if (!active || !videoRef.current) return;
+          try {
+            const result = await detectFace(videoRef.current);
+            if (result.hasFace) {
+              detectedStreak += 1;
+              missedStreak = 0;
+              setStatus('detecting');
+              setMessage('Wajah ditemukan, tahan posisi sebentar...');
+              if (detectedStreak >= 3) {
+                setStatus('detected');
+                setMessage('Verifikasi wajah berhasil.');
+                if (interval) window.clearInterval(interval);
+              }
+            } else {
+              detectedStreak = 0;
+              missedStreak += 1;
+              setStatus(missedStreak >= 3 ? 'failed' : 'detecting');
+              setMessage('Wajah belum terdeteksi. Arahkan wajah ke kamera.');
+            }
+          } catch {
+            setStatus('failed');
+            setMessage('Model deteksi wajah belum siap. Coba beberapa detik lagi.');
+          }
+        }, 700);
+      } catch (error) {
+        setStatus('failed');
+        setMessage(error instanceof Error ? error.message : 'Kamera tidak dapat diakses.');
+      }
+    };
+
+    startCamera();
+
+    return () => {
+      active = false;
+      if (interval) window.clearInterval(interval);
+      stopCameraStream(streamRef.current);
+    };
   }, []);
 
   useEffect(() => {
@@ -160,9 +220,9 @@ export function VerifikasiWajah() {
   }, [status]);
 
   const statusInfo = {
-    detecting: { color: '#2563EB', bg: '#EFF6FF', text: 'Mendeteksi wajah...', subtext: 'Pastikan wajah Anda berada di tengah frame' },
-    detected: { color: '#22C55E', bg: '#DCFCE7', text: 'Wajah terdeteksi ✓', subtext: 'Verifikasi berhasil! Anda dapat memulai ujian.' },
-    failed: { color: '#EF4444', bg: '#FEE2E2', text: 'Wajah tidak terdeteksi', subtext: 'Mohon posisikan wajah kembali ke tengah frame' },
+    detecting: { color: '#2563EB', bg: '#EFF6FF', text: 'Mendeteksi wajah...', subtext: message },
+    detected: { color: '#22C55E', bg: '#DCFCE7', text: 'Wajah terdeteksi', subtext: message },
+    failed: { color: '#EF4444', bg: '#FEE2E2', text: 'Wajah tidak terdeteksi', subtext: message },
   }[status];
 
   return (
@@ -178,7 +238,13 @@ export function VerifikasiWajah() {
           className="absolute inset-0 rounded-3xl overflow-hidden"
           style={{ background: '#1E293B' }}
         >
-          <div className="w-full h-full flex items-center justify-center text-6xl opacity-20">👤</div>
+          <video
+            ref={videoRef}
+            muted
+            playsInline
+            className="w-full h-full object-cover"
+            style={{ transform: 'scaleX(-1)' }}
+          />
         </div>
 
         {/* Face oval */}
@@ -254,7 +320,6 @@ export function VerifikasiWajah() {
       </div>
 
       <p style={{ color: '#64748B', fontSize: 13, textAlign: 'center' }}>{statusInfo.subtext}</p>
-      <p style={{ color: '#CBD5E1', fontSize: 10 }}>Micro-interaction: face scan line animation</p>
 
       <div className="w-full space-y-3">
         <button
@@ -298,9 +363,13 @@ const SOAL_DATA = [
 
 export function HalamanUjian() {
   const { navigate, showFaceAlert, setShowFaceAlert } = useApp();
+  const examVideoRef = useRef<HTMLVideoElement | null>(null);
+  const examStreamRef = useRef<MediaStream | null>(null);
   const [currentQ, setCurrentQ] = useState(0);
   const [answers, setAnswers] = useState<Record<number, number>>({});
   const [timeLeft, setTimeLeft] = useState(5400);
+  const [faceVisible, setFaceVisible] = useState(false);
+  const [cameraMessage, setCameraMessage] = useState('Mengaktifkan kamera');
   const totalQ = 20;
 
   useEffect(() => {
@@ -309,9 +378,59 @@ export function HalamanUjian() {
   }, []);
 
   useEffect(() => {
-    const t = setTimeout(() => setShowFaceAlert(true), 8000);
-    return () => clearTimeout(t);
-  }, []);
+    let active = true;
+    let interval: number | undefined;
+    let missedStreak = 0;
+
+    const startMonitoring = async () => {
+      try {
+        const stream = await createCameraStream();
+        if (!active) {
+          stopCameraStream(stream);
+          return;
+        }
+
+        examStreamRef.current = stream;
+        if (examVideoRef.current) {
+          examVideoRef.current.srcObject = stream;
+          await examVideoRef.current.play();
+        }
+
+        setCameraMessage('Kamera aktif');
+        interval = window.setInterval(async () => {
+          if (!active || !examVideoRef.current) return;
+          try {
+            const result = await detectFace(examVideoRef.current);
+            setFaceVisible(result.hasFace);
+            if (result.hasFace) {
+              missedStreak = 0;
+              setCameraMessage('Wajah terdeteksi');
+            } else {
+              missedStreak += 1;
+              setCameraMessage('Wajah tidak terlihat');
+              if (missedStreak >= 3) setShowFaceAlert(true);
+            }
+          } catch {
+            setFaceVisible(false);
+            setCameraMessage('Deteksi wajah belum siap');
+          }
+        }, 1200);
+      } catch (error) {
+        setFaceVisible(false);
+        setCameraMessage(error instanceof Error ? error.message : 'Kamera tidak dapat diakses');
+        setShowFaceAlert(true);
+      }
+    };
+
+    startMonitoring();
+
+    return () => {
+      active = false;
+      if (interval) window.clearInterval(interval);
+      stopCameraStream(examStreamRef.current);
+      setShowFaceAlert(false);
+    };
+  }, [setShowFaceAlert]);
 
   const formatTime = (s: number) => {
     const m = Math.floor(s / 60);
@@ -345,16 +464,24 @@ export function HalamanUjian() {
             </span>
           </div>
           <div
-            className="flex items-center gap-1.5 px-2.5 py-2 rounded-xl"
-            style={{ background: '#DCFCE7' }}
+            className="flex items-center gap-2 px-2 py-1.5 rounded-xl"
+            title={cameraMessage}
+            style={{ background: faceVisible ? '#DCFCE7' : '#FEE2E2' }}
           >
-            <motion.div
-              animate={{ opacity: [1, 0.2, 1] }}
-              transition={{ repeat: Infinity, duration: 1.2 }}
-              className="w-2 h-2 rounded-full"
-              style={{ background: '#22C55E' }}
-            />
-            <Camera size={13} style={{ color: '#16A34A' }} />
+            <div className="relative w-9 h-7 rounded-lg overflow-hidden" style={{ background: '#0F172A' }}>
+              <video
+                ref={examVideoRef}
+                muted
+                playsInline
+                className="w-full h-full object-cover"
+                style={{ transform: 'scaleX(-1)' }}
+              />
+              <span
+                className="absolute right-1 top-1 w-2 h-2 rounded-full"
+                style={{ background: faceVisible ? '#22C55E' : '#EF4444' }}
+              />
+            </div>
+            <Camera size={13} style={{ color: faceVisible ? '#16A34A' : '#EF4444' }} />
           </div>
         </div>
       </div>
