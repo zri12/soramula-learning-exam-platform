@@ -1,10 +1,125 @@
 import { useState } from 'react';
+import type { ChangeEvent, ReactNode } from 'react';
+import * as XLSX from 'xlsx';
 import {
   Users, UserCheck, Building2, Shield, Search, Plus,
   Edit2, Trash2, ChevronRight, Bell, LogOut, Settings,
-  CheckCircle, ToggleLeft, ToggleRight, Key
+  CheckCircle, ToggleLeft, ToggleRight, Key, ArrowLeft, Save, Upload
 } from 'lucide-react';
 import { useApp } from '../../contexts';
+
+type FormMode = 'tambah' | 'edit';
+type SiswaRecord = {
+  id: number;
+  nama: string;
+  nis: string;
+  kelas: string;
+  jurusan: string;
+  email: string;
+  status: string;
+};
+type GuruRecord = {
+  id: number;
+  nama: string;
+  nip: string;
+  mapel: string;
+  email: string;
+  status: string;
+};
+
+const readSpreadsheetRows = async (file: File) => {
+  const buffer = await file.arrayBuffer();
+  const workbook = XLSX.read(buffer, { type: 'array' });
+  const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+  const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(firstSheet, { defval: '' });
+
+  return rawRows.map((row) =>
+    Object.fromEntries(
+      Object.entries(row).map(([key, value]) => [key.trim().toLowerCase(), String(value).trim()])
+    )
+  );
+};
+
+const pickCell = (row: Record<string, string>, keys: string[]) => {
+  for (const key of keys) {
+    const value = row[key.toLowerCase()];
+    if (value) return value;
+  }
+  return '';
+};
+
+function ToastNotice({ message }: { message: string }) {
+  if (!message) return null;
+  return (
+    <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-4 py-3 rounded-2xl shadow-lg"
+      style={{ background: '#DCFCE7', color: '#16A34A', border: '1px solid #BBF7D0', minWidth: 280 }}>
+      <CheckCircle size={18} /> <span style={{ fontSize: 14, fontWeight: 600 }}>{message}</span>
+    </div>
+  );
+}
+
+function FormField({ label, defaultValue = '', type = 'text' }: { label: string; defaultValue?: string | number; type?: string }) {
+  return (
+    <label className="space-y-1.5">
+      <span style={{ color: '#64748B', fontSize: 12, fontWeight: 600 }}>{label}</span>
+      <input
+        type={type}
+        defaultValue={defaultValue}
+        className="w-full px-4 py-3 rounded-2xl outline-none"
+        style={{ background: '#fff', border: '1.5px solid #E2E8F0', color: '#0F172A', fontSize: 14 }}
+      />
+    </label>
+  );
+}
+
+function SelectField({ label, defaultValue, options }: { label: string; defaultValue?: string; options: string[] }) {
+  return (
+    <label className="space-y-1.5">
+      <span style={{ color: '#64748B', fontSize: 12, fontWeight: 600 }}>{label}</span>
+      <select
+        defaultValue={defaultValue}
+        className="w-full px-4 py-3 rounded-2xl outline-none"
+        style={{ background: '#fff', border: '1.5px solid #E2E8F0', color: '#0F172A', fontSize: 14 }}
+      >
+        {options.map((option) => <option key={option}>{option}</option>)}
+      </select>
+    </label>
+  );
+}
+
+function FormShell({
+  title,
+  children,
+  onCancel,
+  onSubmit,
+}: {
+  title: string;
+  children: ReactNode;
+  onCancel: () => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <div className="p-4 md:p-6 max-w-3xl mx-auto space-y-4">
+      <button onClick={onCancel} className="inline-flex items-center gap-2 font-semibold text-sm" style={{ color: '#2563EB' }}>
+        <ArrowLeft size={16} /> Kembali
+      </button>
+      <div className="p-4 md:p-5 rounded-2xl space-y-4" style={{ background: '#fff', border: '1px solid #E2E8F0' }}>
+        <h2 style={{ color: '#0F172A', fontWeight: 700, fontSize: 20 }}>{title}</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">{children}</div>
+        <div className="flex flex-wrap justify-end gap-2 pt-2">
+          <button onClick={onCancel} className="px-4 py-3 rounded-2xl font-semibold text-sm"
+            style={{ background: '#F8FAFC', color: '#64748B', border: '1px solid #E2E8F0' }}>
+            Batal
+          </button>
+          <button onClick={onSubmit} className="inline-flex items-center gap-2 px-4 py-3 rounded-2xl font-semibold text-sm"
+            style={{ background: '#2563EB', color: '#fff' }}>
+            <Save size={16} /> Simpan
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ─── Dashboard Petugas TU ─────────────────────────────────────────
 export function DashboardTU() {
@@ -107,7 +222,7 @@ export function DashboardTU() {
 }
 
 // ─── Kelola Data Siswa ────────────────────────────────────────────
-const SISWA_DATA = [
+const SISWA_DATA: SiswaRecord[] = [
   { id: 1, nama: 'Nabila Putri', nis: '20240001', kelas: 'XI IPA 1', jurusan: 'IPA', email: 'nabila@soramula.id', status: 'Aktif' },
   { id: 2, nama: 'Andi Rahman', nis: '20240002', kelas: 'XI IPA 1', jurusan: 'IPA', email: 'andi@soramula.id', status: 'Aktif' },
   { id: 3, nama: 'Siti Maulida', nis: '20240003', kelas: 'XI IPA 2', jurusan: 'IPA', email: 'siti@soramula.id', status: 'Aktif' },
@@ -117,10 +232,79 @@ const SISWA_DATA = [
 
 export function KelolaDataSiswa() {
   const [search, setSearch] = useState('');
-  const filtered = SISWA_DATA.filter((s) => s.nama.toLowerCase().includes(search.toLowerCase()));
+  const [siswaData, setSiswaData] = useState<SiswaRecord[]>(SISWA_DATA);
+  const [formMode, setFormMode] = useState<FormMode | null>(null);
+  const [selected, setSelected] = useState<SiswaRecord | null>(null);
+  const [toast, setToast] = useState('');
+  const filtered = siswaData.filter((s) => s.nama.toLowerCase().includes(search.toLowerCase()));
+
+  const notify = (message: string) => {
+    setToast(message);
+    setTimeout(() => setToast(''), 3000);
+  };
+  const openForm = (mode: FormMode, siswa: SiswaRecord | null = null) => {
+    setFormMode(mode);
+    setSelected(siswa);
+  };
+  const closeForm = () => {
+    setFormMode(null);
+    setSelected(null);
+  };
+  const submitForm = () => {
+    notify(`Data siswa berhasil ${formMode === 'edit' ? 'diperbarui' : 'disimpan'}`);
+    closeForm();
+  };
+  const importSiswa = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    try {
+      const rows = await readSpreadsheetRows(file);
+      const startId = Math.max(0, ...siswaData.map((s) => s.id));
+      const imported = rows
+        .map((row, index): SiswaRecord => ({
+          id: startId + index + 1,
+          nama: pickCell(row, ['nama siswa', 'nama', 'name']),
+          nis: pickCell(row, ['nis', 'nomor induk', 'nomor induk siswa']),
+          kelas: pickCell(row, ['kelas', 'class']),
+          jurusan: pickCell(row, ['jurusan', 'peminatan']),
+          email: pickCell(row, ['email', 'e-mail']),
+          status: pickCell(row, ['status', 'status akun']) || 'Aktif',
+        }))
+        .filter((s) => s.nama && s.nis);
+
+      if (!imported.length) {
+        notify('File belum berisi data siswa yang valid');
+        return;
+      }
+
+      setSiswaData((prev) => [...prev, ...imported]);
+      notify(`${imported.length} data siswa berhasil diimport`);
+    } catch {
+      notify('Gagal membaca file siswa');
+    }
+  };
+
+  if (formMode) {
+    return (
+      <>
+        <ToastNotice message={toast} />
+        <FormShell title={`${formMode === 'edit' ? 'Edit' : 'Tambah'} Siswa`} onCancel={closeForm} onSubmit={submitForm}>
+          <FormField label="Nama Siswa" defaultValue={selected?.nama} />
+          <FormField label="NIS" defaultValue={selected?.nis} />
+          <SelectField label="Kelas" defaultValue={selected?.kelas} options={['X IPA 1', 'XI IPA 1', 'XI IPA 2', 'XI IPS 1']} />
+          <SelectField label="Jurusan" defaultValue={selected?.jurusan} options={['IPA', 'IPS']} />
+          <FormField label="Email" defaultValue={selected?.email} type="email" />
+          <SelectField label="Status" defaultValue={selected?.status} options={['Aktif', 'Nonaktif']} />
+        </FormShell>
+      </>
+    );
+  }
 
   return (
     <div className="p-4 md:p-6 max-w-5xl mx-auto space-y-4">
+      <ToastNotice message={toast} />
       <h2 className="hidden md:block" style={{ color: '#0F172A', fontWeight: 700, fontSize: 20 }}>Data Siswa</h2>
 
       <div className="flex flex-wrap items-center gap-3">
@@ -134,10 +318,15 @@ export function KelolaDataSiswa() {
           style={{ background: '#fff', border: '1.5px solid #E2E8F0', fontSize: 14, color: '#374151' }}>
           <option>Semua Kelas</option><option>XI IPA 1</option><option>XI IPA 2</option>
         </select>
-        <button className="flex items-center gap-1.5 px-4 py-3 rounded-2xl font-semibold text-sm flex-shrink-0"
+        <button onClick={() => openForm('tambah')} className="flex items-center gap-1.5 px-4 py-3 rounded-2xl font-semibold text-sm flex-shrink-0"
           style={{ background: '#2563EB', color: '#fff' }}>
           <Plus size={15} /> Tambah Siswa
         </button>
+        <label className="flex items-center gap-1.5 px-4 py-3 rounded-2xl font-semibold text-sm flex-shrink-0 cursor-pointer"
+          style={{ background: '#16A34A', color: '#fff' }}>
+          <Upload size={15} /> Input Banyak
+          <input type="file" accept=".csv,.xls,.xlsx" onChange={importSiswa} className="hidden" />
+        </label>
       </div>
 
       {/* Mobile cards */}
@@ -156,8 +345,8 @@ export function KelolaDataSiswa() {
             </div>
             <p style={{ color: '#64748B', fontSize: 12 }}>{s.kelas} · {s.jurusan} · {s.email}</p>
             <div className="flex gap-2 mt-3">
-              <button className="flex-1 py-2 rounded-xl text-xs font-medium" style={{ background: '#EFF6FF', color: '#2563EB' }}>Edit</button>
-              <button className="flex-1 py-2 rounded-xl text-xs font-medium" style={{ background: '#FEE2E2', color: '#EF4444' }}>Hapus</button>
+              <button onClick={() => openForm('edit', s)} className="flex-1 py-2 rounded-xl text-xs font-medium" style={{ background: '#EFF6FF', color: '#2563EB' }}>Edit</button>
+              <button onClick={() => notify(`Notifikasi hapus data siswa ${s.nama}`)} className="flex-1 py-2 rounded-xl text-xs font-medium" style={{ background: '#FEE2E2', color: '#EF4444' }}>Hapus</button>
             </div>
           </div>
         ))}
@@ -189,8 +378,8 @@ export function KelolaDataSiswa() {
                 </td>
                 <td className="px-5 py-4">
                   <div className="flex items-center gap-1">
-                    <button className="p-2 rounded-lg hover:bg-blue-50"><Edit2 size={14} style={{ color: '#2563EB' }} /></button>
-                    <button className="p-2 rounded-lg hover:bg-red-50"><Trash2 size={14} style={{ color: '#EF4444' }} /></button>
+                    <button onClick={() => openForm('edit', s)} className="p-2 rounded-lg hover:bg-blue-50"><Edit2 size={14} style={{ color: '#2563EB' }} /></button>
+                    <button onClick={() => notify(`Notifikasi hapus data siswa ${s.nama}`)} className="p-2 rounded-lg hover:bg-red-50"><Trash2 size={14} style={{ color: '#EF4444' }} /></button>
                   </div>
                 </td>
               </tr>
@@ -203,32 +392,109 @@ export function KelolaDataSiswa() {
 }
 
 // ─── Kelola Data Guru ─────────────────────────────────────────────
-const GURU_DATA = [
+const GURU_DATA: GuruRecord[] = [
   { id: 1, nama: 'Rian Pratama, S.Pd.', nip: '198905152015041002', mapel: 'Biologi', email: 'rian@soramula.id', status: 'Aktif' },
   { id: 2, nama: 'Dr. Sari Wulandari', nip: '198503102010012005', mapel: 'Matematika', email: 'sari.w@soramula.id', status: 'Aktif' },
   { id: 3, nama: 'Budi Santoso, M.Pd.', nip: '197812082008011003', mapel: 'Fisika', email: 'budi.s@soramula.id', status: 'Aktif' },
 ];
 
 export function KelolaDataGuru() {
+  const [search, setSearch] = useState('');
+  const [guruData, setGuruData] = useState<GuruRecord[]>(GURU_DATA);
+  const [formMode, setFormMode] = useState<FormMode | null>(null);
+  const [selected, setSelected] = useState<GuruRecord | null>(null);
+  const [toast, setToast] = useState('');
+  const filtered = guruData.filter((g) =>
+    [g.nama, g.nip, g.mapel].some((value) => value.toLowerCase().includes(search.toLowerCase()))
+  );
+
+  const notify = (message: string) => {
+    setToast(message);
+    setTimeout(() => setToast(''), 3000);
+  };
+  const openForm = (mode: FormMode, guru: GuruRecord | null = null) => {
+    setFormMode(mode);
+    setSelected(guru);
+  };
+  const closeForm = () => {
+    setFormMode(null);
+    setSelected(null);
+  };
+  const submitForm = () => {
+    notify(`Data guru berhasil ${formMode === 'edit' ? 'diperbarui' : 'disimpan'}`);
+    closeForm();
+  };
+  const importGuru = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    try {
+      const rows = await readSpreadsheetRows(file);
+      const startId = Math.max(0, ...guruData.map((g) => g.id));
+      const imported = rows
+        .map((row, index): GuruRecord => ({
+          id: startId + index + 1,
+          nama: pickCell(row, ['nama guru', 'nama', 'name']),
+          nip: pickCell(row, ['nip', 'nomor induk pegawai']),
+          mapel: pickCell(row, ['mata pelajaran', 'mapel', 'pelajaran', 'subject']),
+          email: pickCell(row, ['email', 'e-mail']),
+          status: pickCell(row, ['status', 'status akun']) || 'Aktif',
+        }))
+        .filter((g) => g.nama && g.mapel);
+
+      if (!imported.length) {
+        notify('File belum berisi data guru/mapel yang valid');
+        return;
+      }
+
+      setGuruData((prev) => [...prev, ...imported]);
+      notify(`${imported.length} data guru berhasil diimport`);
+    } catch {
+      notify('Gagal membaca file guru');
+    }
+  };
+
+  if (formMode) {
+    return (
+      <>
+        <ToastNotice message={toast} />
+        <FormShell title={`${formMode === 'edit' ? 'Edit' : 'Tambah'} Guru`} onCancel={closeForm} onSubmit={submitForm}>
+          <FormField label="Nama Guru" defaultValue={selected?.nama} />
+          <FormField label="NIP" defaultValue={selected?.nip} />
+          <SelectField label="Mata Pelajaran" defaultValue={selected?.mapel} options={['Biologi', 'Matematika', 'Fisika', 'Kimia', 'Bahasa Inggris']} />
+          <FormField label="Email" defaultValue={selected?.email} type="email" />
+          <SelectField label="Status" defaultValue={selected?.status} options={['Aktif', 'Nonaktif']} />
+        </FormShell>
+      </>
+    );
+  }
+
   return (
     <div className="p-4 md:p-6 max-w-4xl mx-auto space-y-4">
+      <ToastNotice message={toast} />
       <h2 className="hidden md:block" style={{ color: '#0F172A', fontWeight: 700, fontSize: 20 }}>Data Guru</h2>
 
-      <div className="flex gap-3">
+      <div className="flex flex-wrap gap-3">
         <div className="relative flex-1">
           <Search size={15} className="absolute left-4 top-1/2 -translate-y-1/2" style={{ color: '#94A3B8' }} />
-          <input placeholder="Cari guru..." className="w-full pl-11 pr-4 py-3 rounded-2xl outline-none"
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Cari guru atau mapel..." className="w-full pl-11 pr-4 py-3 rounded-2xl outline-none"
             style={{ background: '#fff', border: '1.5px solid #E2E8F0', fontSize: 14 }} />
         </div>
-        <button className="flex items-center gap-1.5 px-4 py-3 rounded-2xl font-semibold text-sm flex-shrink-0"
+        <button onClick={() => openForm('tambah')} className="flex items-center gap-1.5 px-4 py-3 rounded-2xl font-semibold text-sm flex-shrink-0"
           style={{ background: '#2563EB', color: '#fff' }}>
           <Plus size={15} /> Tambah Guru
         </button>
+        <label className="flex items-center gap-1.5 px-4 py-3 rounded-2xl font-semibold text-sm flex-shrink-0 cursor-pointer"
+          style={{ background: '#16A34A', color: '#fff' }}>
+          <Upload size={15} /> Import Guru
+          <input type="file" accept=".csv,.xls,.xlsx" onChange={importGuru} className="hidden" />
+        </label>
       </div>
 
       {/* Mobile cards */}
       <div className="md:hidden space-y-3">
-        {GURU_DATA.map((g) => (
+        {filtered.map((g) => (
           <div key={g.id} className="p-4 rounded-2xl" style={{ background: '#fff', border: '1px solid #F1F5F9' }}>
             <div className="flex justify-between mb-1.5">
               <div>
@@ -241,10 +507,10 @@ export function KelolaDataGuru() {
             </div>
             <p style={{ color: '#64748B', fontSize: 12 }}>{g.email}</p>
             <div className="flex gap-2 mt-3">
-              <button className="flex-1 py-2 rounded-xl text-xs font-medium flex items-center justify-center gap-1" style={{ background: '#EFF6FF', color: '#2563EB' }}>
+              <button onClick={() => openForm('edit', g)} className="flex-1 py-2 rounded-xl text-xs font-medium flex items-center justify-center gap-1" style={{ background: '#EFF6FF', color: '#2563EB' }}>
                 <Edit2 size={12} /> Edit
               </button>
-              <button className="flex-1 py-2 rounded-xl text-xs font-medium flex items-center justify-center gap-1" style={{ background: '#FEE2E2', color: '#EF4444' }}>
+              <button onClick={() => notify(`Notifikasi hapus data guru ${g.nama}`)} className="flex-1 py-2 rounded-xl text-xs font-medium flex items-center justify-center gap-1" style={{ background: '#FEE2E2', color: '#EF4444' }}>
                 <Trash2 size={12} /> Hapus
               </button>
             </div>
@@ -263,7 +529,7 @@ export function KelolaDataGuru() {
             </tr>
           </thead>
           <tbody>
-            {GURU_DATA.map((g, i) => (
+            {filtered.map((g, i) => (
               <tr key={g.id} style={{ borderTop: i > 0 ? '1px solid #F1F5F9' : 'none' }}>
                 <td className="px-5 py-4" style={{ color: '#0F172A', fontWeight: 600, fontSize: 14 }}>{g.nama}</td>
                 <td className="px-5 py-4" style={{ color: '#64748B', fontSize: 13 }}>{g.nip}</td>
@@ -272,12 +538,15 @@ export function KelolaDataGuru() {
                 </td>
                 <td className="px-5 py-4" style={{ color: '#64748B', fontSize: 14 }}>{g.email}</td>
                 <td className="px-5 py-4">
-                  <span className="px-3 py-1 rounded-full text-xs font-semibold" style={{ background: '#DCFCE7', color: '#16A34A' }}>{g.status}</span>
+                  <span className="px-3 py-1 rounded-full text-xs font-semibold"
+                    style={{ background: g.status === 'Aktif' ? '#DCFCE7' : '#FEE2E2', color: g.status === 'Aktif' ? '#16A34A' : '#EF4444' }}>
+                    {g.status}
+                  </span>
                 </td>
                 <td className="px-5 py-4">
                   <div className="flex items-center gap-1">
-                    <button className="p-2 rounded-lg hover:bg-blue-50"><Edit2 size={14} style={{ color: '#2563EB' }} /></button>
-                    <button className="p-2 rounded-lg hover:bg-red-50"><Trash2 size={14} style={{ color: '#EF4444' }} /></button>
+                    <button onClick={() => openForm('edit', g)} className="p-2 rounded-lg hover:bg-blue-50"><Edit2 size={14} style={{ color: '#2563EB' }} /></button>
+                    <button onClick={() => notify(`Notifikasi hapus data guru ${g.nama}`)} className="p-2 rounded-lg hover:bg-red-50"><Trash2 size={14} style={{ color: '#EF4444' }} /></button>
                   </div>
                 </td>
               </tr>
@@ -298,8 +567,45 @@ const KELAS_DATA = [
 ];
 
 export function KelolaDataKelas() {
+  const [formMode, setFormMode] = useState<FormMode | null>(null);
+  const [selected, setSelected] = useState<(typeof KELAS_DATA)[number] | null>(null);
+  const [toast, setToast] = useState('');
+
+  const notify = (message: string) => {
+    setToast(message);
+    setTimeout(() => setToast(''), 3000);
+  };
+  const openForm = (mode: FormMode, kelas: (typeof KELAS_DATA)[number] | null = null) => {
+    setFormMode(mode);
+    setSelected(kelas);
+  };
+  const closeForm = () => {
+    setFormMode(null);
+    setSelected(null);
+  };
+  const submitForm = () => {
+    notify(`Data kelas berhasil ${formMode === 'edit' ? 'diperbarui' : 'disimpan'}`);
+    closeForm();
+  };
+
+  if (formMode) {
+    return (
+      <>
+        <ToastNotice message={toast} />
+        <FormShell title={`${formMode === 'edit' ? 'Edit' : 'Tambah'} Kelas`} onCancel={closeForm} onSubmit={submitForm}>
+          <FormField label="Nama Kelas" defaultValue={selected?.nama} />
+          <SelectField label="Tingkat" defaultValue={selected?.tingkat} options={['X', 'XI', 'XII']} />
+          <SelectField label="Jurusan" defaultValue={selected?.jurusan} options={['IPA', 'IPS']} />
+          <FormField label="Wali Kelas" defaultValue={selected?.walikelas} />
+          <FormField label="Jumlah Siswa" defaultValue={selected?.jumlah} type="number" />
+        </FormShell>
+      </>
+    );
+  }
+
   return (
     <div className="p-4 md:p-6 max-w-4xl mx-auto space-y-4">
+      <ToastNotice message={toast} />
       <h2 className="hidden md:block" style={{ color: '#0F172A', fontWeight: 700, fontSize: 20 }}>Data Kelas</h2>
 
       <div className="flex gap-3">
@@ -308,7 +614,7 @@ export function KelolaDataKelas() {
           <input placeholder="Cari kelas..." className="w-full pl-11 pr-4 py-3 rounded-2xl outline-none"
             style={{ background: '#fff', border: '1.5px solid #E2E8F0', fontSize: 14 }} />
         </div>
-        <button className="flex items-center gap-1.5 px-4 py-3 rounded-2xl font-semibold text-sm flex-shrink-0"
+        <button onClick={() => openForm('tambah')} className="flex items-center gap-1.5 px-4 py-3 rounded-2xl font-semibold text-sm flex-shrink-0"
           style={{ background: '#2563EB', color: '#fff' }}>
           <Plus size={15} /> Tambah Kelas
         </button>
@@ -329,8 +635,8 @@ export function KelolaDataKelas() {
             <div className="flex items-center justify-between mt-2">
               <span style={{ color: '#0F172A', fontWeight: 700, fontSize: 14 }}>{k.jumlah} siswa</span>
               <div className="flex gap-2">
-                <button className="px-3 py-1.5 rounded-lg text-xs font-medium" style={{ background: '#EFF6FF', color: '#2563EB' }}>Edit</button>
-                <button className="px-3 py-1.5 rounded-lg text-xs font-medium" style={{ background: '#FEE2E2', color: '#EF4444' }}>Hapus</button>
+                <button onClick={() => openForm('edit', k)} className="px-3 py-1.5 rounded-lg text-xs font-medium" style={{ background: '#EFF6FF', color: '#2563EB' }}>Edit</button>
+                <button onClick={() => notify(`Notifikasi hapus data kelas ${k.nama}`)} className="px-3 py-1.5 rounded-lg text-xs font-medium" style={{ background: '#FEE2E2', color: '#EF4444' }}>Hapus</button>
               </div>
             </div>
           </div>
@@ -362,8 +668,8 @@ export function KelolaDataKelas() {
                 <td className="px-5 py-4" style={{ color: '#0F172A', fontWeight: 700, fontSize: 15 }}>{k.jumlah}</td>
                 <td className="px-5 py-4">
                   <div className="flex items-center gap-1">
-                    <button className="p-2 rounded-lg hover:bg-blue-50"><Edit2 size={14} style={{ color: '#2563EB' }} /></button>
-                    <button className="p-2 rounded-lg hover:bg-red-50"><Trash2 size={14} style={{ color: '#EF4444' }} /></button>
+                    <button onClick={() => openForm('edit', k)} className="p-2 rounded-lg hover:bg-blue-50"><Edit2 size={14} style={{ color: '#2563EB' }} /></button>
+                    <button onClick={() => notify(`Notifikasi hapus data kelas ${k.nama}`)} className="p-2 rounded-lg hover:bg-red-50"><Trash2 size={14} style={{ color: '#EF4444' }} /></button>
                   </div>
                 </td>
               </tr>
@@ -395,6 +701,8 @@ export function KelolaAkun() {
     Object.fromEntries(AKUN_DATA.map((a) => [a.id, a.aktif]))
   );
   const [showToast, setShowToast] = useState('');
+  const [formMode, setFormMode] = useState<FormMode | null>(null);
+  const [selected, setSelected] = useState<(typeof AKUN_DATA)[number] | null>(null);
 
   const toggleStatus = (id: number) => {
     const newVal = !statuses[id];
@@ -408,6 +716,34 @@ export function KelolaAkun() {
     setShowToast(`Password ${nama} berhasil direset`);
     setTimeout(() => setShowToast(''), 3000);
   };
+
+  const openForm = (akun: (typeof AKUN_DATA)[number]) => {
+    setFormMode('edit');
+    setSelected(akun);
+  };
+  const closeForm = () => {
+    setFormMode(null);
+    setSelected(null);
+  };
+  const submitForm = () => {
+    setShowToast('Data akun berhasil diperbarui');
+    setTimeout(() => setShowToast(''), 3000);
+    closeForm();
+  };
+
+  if (formMode) {
+    return (
+      <>
+        <ToastNotice message={showToast} />
+        <FormShell title="Edit Akun" onCancel={closeForm} onSubmit={submitForm}>
+          <FormField label="Nama" defaultValue={selected?.nama} />
+          <FormField label="Email" defaultValue={selected?.email} type="email" />
+          <SelectField label="Role" defaultValue={selected?.role} options={['Siswa', 'Guru', 'Petugas TU']} />
+          <SelectField label="Status Akun" defaultValue={selected && statuses[selected.id] ? 'Aktif' : 'Nonaktif'} options={['Aktif', 'Nonaktif']} />
+        </FormShell>
+      </>
+    );
+  }
 
   return (
     <div className="p-4 md:p-6 max-w-4xl mx-auto space-y-4">
@@ -500,7 +836,7 @@ export function KelolaAkun() {
                         style={{ background: '#FFF7ED', color: '#F59E0B' }}>
                         <Key size={12} /> Reset
                       </button>
-                      <button className="p-2 rounded-lg hover:bg-blue-50"><Edit2 size={14} style={{ color: '#2563EB' }} /></button>
+                      <button onClick={() => openForm(a)} className="p-2 rounded-lg hover:bg-blue-50"><Edit2 size={14} style={{ color: '#2563EB' }} /></button>
                     </div>
                   </td>
                 </tr>
