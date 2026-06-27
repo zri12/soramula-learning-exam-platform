@@ -2,8 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Eye, EyeOff, Fingerprint, ChevronRight, AlertCircle,
-  CheckCircle, X, BookOpen, ClipboardList, TrendingUp, ArrowRight,
-  GraduationCap, BookUser, Briefcase
+  CheckCircle, X, BookOpen, ClipboardList, TrendingUp, ArrowRight
 } from 'lucide-react';
 import { useApp, Role } from '../../contexts';
 import logo from '../../../assets/logo.png';
@@ -324,12 +323,6 @@ function FingerprintModal({ onClose, onSuccess }: { onClose: () => void; onSucce
 }
 
 // ─── Role Selector ────────────────────────────────────────────────
-const ROLE_OPTIONS: { value: Role; label: string; sub: string; icon: typeof GraduationCap; color: string; bg: string; activeBg: string }[] = [
-  { value: 'siswa', label: 'Siswa', sub: 'Pelajar SMA', icon: GraduationCap, color: '#2563EB', bg: '#EFF6FF', activeBg: '#2563EB' },
-  { value: 'guru', label: 'Guru', sub: 'Pengajar', icon: BookUser, color: '#22C55E', bg: '#DCFCE7', activeBg: '#16A34A' },
-  { value: 'admin', label: 'Petugas TU', sub: 'Administrator', icon: Briefcase, color: '#A855F7', bg: '#FDF4FF', activeBg: '#9333EA' },
-];
-
 const ROLE_CREDENTIALS: Record<Role, { email: string; password: string }> = {
   siswa: {
     email: 'siswa@soramula.id',
@@ -374,11 +367,23 @@ function LoginPage() {
       setError('Email dan password tidak boleh kosong.');
       return;
     }
+
+    const matchedRole = (Object.keys(ROLE_CREDENTIALS) as Role[]).find((itemRole) => {
+      const credentials = ROLE_CREDENTIALS[itemRole];
+      return credentials.email === email.trim().toLowerCase() && credentials.password === password;
+    });
+
+    if (!matchedRole) {
+      setError('Email atau password tidak sesuai.');
+      return;
+    }
+
     setError('');
     setLoading(true);
     setTimeout(() => {
       setLoading(false);
-      navigate(ROLE_DEFAULTS_VIEW[role] as any);
+      setRole(matchedRole);
+      navigate(ROLE_DEFAULTS_VIEW[matchedRole] as any);
     }, 1500);
   };
 
@@ -386,8 +391,6 @@ function LoginPage() {
     setShowFingerprint(false);
     navigate(ROLE_DEFAULTS_VIEW[role] as any);
   };
-
-  const selectedRole = ROLE_OPTIONS.find((r) => r.value === role)!;
 
   return (
     <div className="h-full overflow-y-auto" style={{ background: isDarkMode ? '#020617' : '#F8FAFC' }}>
@@ -413,63 +416,8 @@ function LoginPage() {
       <div className="px-5 -mt-4 pb-8">
         <div className="rounded-3xl p-5" style={{ background: isDarkMode ? '#111827' : '#fff', boxShadow: isDarkMode ? '0 8px 32px rgba(0,0,0,0.35)' : '0 8px 32px rgba(15,23,42,0.10)' }}>
 
-          {/* Role Selector */}
-          <div className="mb-5">
-            <p style={{ color: '#64748B', fontSize: 12, fontWeight: 600, marginBottom: 10, textAlign: 'center', textTransform: 'uppercase', letterSpacing: 0.5 }}>
-              Masuk sebagai
-            </p>
-            <div className="grid grid-cols-3 gap-2">
-              {ROLE_OPTIONS.map((opt) => {
-                const isActive = role === opt.value;
-                return (
-                  <button
-                    key={opt.value}
-                    onClick={() => {
-                      setRole(opt.value);
-                      const defaults = ROLE_CREDENTIALS[opt.value];
-                      setEmail(defaults.email);
-                      setPassword(defaults.password);
-                      setError('');
-                    }}
-                    className="flex flex-col items-center gap-1.5 py-3 px-1 rounded-2xl transition-all"
-                    style={{
-                      background: isActive ? opt.activeBg : opt.bg,
-                      border: `2px solid ${isActive ? opt.activeBg : 'transparent'}`,
-                      transform: isActive ? 'scale(1.03)' : 'scale(1)',
-                    }}
-                  >
-                    <opt.icon
-                      size={20}
-                      style={{ color: isActive ? '#fff' : opt.color }}
-                    />
-                    <span
-                      style={{
-                        color: isActive ? '#fff' : opt.color,
-                        fontSize: 12,
-                        fontWeight: 700,
-                        lineHeight: 1.2,
-                        textAlign: 'center',
-                      }}
-                    >
-                      {opt.label}
-                    </span>
-                    <span
-                      style={{
-                        color: isActive ? 'rgba(255,255,255,0.75)' : '#94A3B8',
-                        fontSize: 10,
-                        textAlign: 'center',
-                      }}
-                    >
-                      {opt.sub}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
           {/* Divider */}
-          <div className="flex items-center gap-3 mb-5">
+          <div className="hidden">
             <div className="flex-1 h-px" style={{ background: '#F1F5F9' }} />
             <span style={{ fontSize: 12, color: '#CBD5E1' }}>———</span>
             <div className="flex-1 h-px" style={{ background: '#F1F5F9' }} />
@@ -477,8 +425,7 @@ function LoginPage() {
 
           <h2 style={{ color: '#0F172A', fontSize: 18, fontWeight: 700, marginBottom: 4 }}>Masuk ke Soramula</h2>
           <p style={{ color: '#64748B', fontSize: 13, marginBottom: 18 }}>
-            Login sebagai{' '}
-            <span style={{ color: selectedRole.color, fontWeight: 700 }}>{selectedRole.label}</span>
+            Masukkan email dan password untuk melanjutkan.
           </p>
 
           {error && (

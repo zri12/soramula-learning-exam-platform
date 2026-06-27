@@ -5,6 +5,11 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  server: {
+    watch: {
+      ignored: ['**/screenshots/**'],
+    },
+  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

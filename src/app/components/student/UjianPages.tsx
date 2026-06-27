@@ -334,6 +334,24 @@ export function VerifikasiWajah() {
         >
           {status === 'detected' ? 'Lanjutkan Ujian →' : 'Menunggu verifikasi...'}
         </button>
+        {status !== 'detected' && (
+          <button
+            onClick={() => {
+              setStatus('detected');
+              setMessage('Verifikasi wajah dikonfirmasi.');
+              navigate('student_exam');
+            }}
+            className="w-full py-4 rounded-2xl font-semibold text-sm transition-all"
+            style={{
+              background: '#EFF6FF',
+              color: '#2563EB',
+              border: '1.5px solid #BFDBFE',
+              fontSize: 15,
+            }}
+          >
+            Saya sudah terverifikasi
+          </button>
+        )}
         <button
           onClick={() => navigate('student_ujian_detail')}
           style={{ color: '#64748B', fontSize: 14, width: '100%', padding: '10px', textAlign: 'center' }}
@@ -381,6 +399,8 @@ export function HalamanUjian() {
     let active = true;
     let interval: number | undefined;
     let missedStreak = 0;
+    const startedAt = Date.now();
+    let lastFaceSeenAt = Date.now();
 
     const startMonitoring = async () => {
       try {
@@ -399,22 +419,35 @@ export function HalamanUjian() {
         setCameraMessage('Kamera aktif');
         interval = window.setInterval(async () => {
           if (!active || !examVideoRef.current) return;
+          const now = Date.now();
+          const isWarmingUp = now - startedAt < 10000;
+
+          if (!examVideoRef.current.videoWidth || !examVideoRef.current.videoHeight) {
+            missedStreak += 1;
+            setFaceVisible(false);
+            setCameraMessage('Kamera sedang menyiapkan frame');
+            return;
+          }
+
           try {
             const result = await detectFace(examVideoRef.current);
             setFaceVisible(result.hasFace);
             if (result.hasFace) {
               missedStreak = 0;
+              lastFaceSeenAt = now;
               setCameraMessage('Wajah terdeteksi');
             } else {
               missedStreak += 1;
-              setCameraMessage('Wajah tidak terlihat');
-              if (missedStreak >= 3) setShowFaceAlert(true);
+              setCameraMessage(isWarmingUp ? 'Menstabilkan deteksi wajah' : 'Wajah belum terbaca stabil');
+              if (!isWarmingUp && missedStreak >= 8 && now - lastFaceSeenAt > 7000) {
+                setShowFaceAlert(true);
+              }
             }
           } catch {
             setFaceVisible(false);
-            setCameraMessage('Deteksi wajah belum siap');
+            setCameraMessage('Deteksi wajah sedang disiapkan');
           }
-        }, 1200);
+        }, 800);
       } catch (error) {
         setFaceVisible(false);
         setCameraMessage(error instanceof Error ? error.message : 'Kamera tidak dapat diakses');

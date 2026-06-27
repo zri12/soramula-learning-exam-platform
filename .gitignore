@@ -9,6 +9,9 @@ dist/
 *.local
 *.log
 
+screenshots/chrome-profile*/
+screenshots/*.log
+
 .DS_Store
 Thumbs.db
 .idea/

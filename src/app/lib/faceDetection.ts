@@ -1,6 +1,7 @@
 import { FaceDetector, FilesetResolver } from '@mediapipe/tasks-vision';
 
 let detectorPromise: Promise<FaceDetector> | null = null;
+let lastVideoTime = -1;
 
 export type FaceDetectionResult = {
   hasFace: boolean;
@@ -32,15 +33,27 @@ export async function getFaceDetector() {
       const vision = await FilesetResolver.forVisionTasks(
         'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm'
       );
-      return FaceDetector.createFromOptions(vision, {
-        baseOptions: {
-          modelAssetPath:
-            'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/latest/blaze_face_short_range.tflite',
-          delegate: 'GPU',
-        },
-        runningMode: 'VIDEO',
-        minDetectionConfidence: 0.55,
-      });
+      const baseOptions = {
+        modelAssetPath:
+          'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/latest/blaze_face_short_range.tflite',
+      };
+      const options = {
+        baseOptions,
+        runningMode: 'VIDEO' as const,
+        minDetectionConfidence: 0.35,
+      };
+
+      try {
+        return await FaceDetector.createFromOptions(vision, {
+          ...options,
+          baseOptions: { ...baseOptions, delegate: 'GPU' },
+        });
+      } catch {
+        return FaceDetector.createFromOptions(vision, {
+          ...options,
+          baseOptions: { ...baseOptions, delegate: 'CPU' },
+        });
+      }
     })();
   }
 
@@ -53,7 +66,9 @@ export async function detectFace(video: HTMLVideoElement): Promise<FaceDetection
   }
 
   const detector = await getFaceDetector();
-  const result = detector.detectForVideo(video, performance.now());
+  const timestamp = video.currentTime * 1000;
+  const result = detector.detectForVideo(video, timestamp > lastVideoTime ? timestamp : performance.now());
+  lastVideoTime = Math.max(timestamp, lastVideoTime + 1);
   const faceCount = result.detections.length;
 
   return {
